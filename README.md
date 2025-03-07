@@ -1,3 +1,7 @@
+# NOTE FOR MR. R
+please open main.ts for actual code
+
+
 
 > Open this page at [https://ivokator.github.io/legalized-gambling/](https://ivokator.github.io/legalized-gambling/)
 
