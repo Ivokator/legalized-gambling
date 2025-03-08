@@ -14,20 +14,32 @@
 //  Constants
 const INITIAL_POINTS: number = 15
 const INITIAL_BET: number = 1
+const INITIAL_DECK: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
+// Game variables
 let blackjack_goal: number = 21
-let previous_goals: number[] = [21]
+
+// Wildcard display variables
 let wildcard_display_working: boolean = true
 let pointer: number = 0
 
+// Wildcard dependent variables
+let previous_goals: number[] = [21]
+let reveal_bot_hidden: boolean = false
+
+
+// OLED Display
 OLED12864_I2C.init(60)
 OLED12864_I2C.on()
 
+// Sound / Buzzer
 music.setBuiltInSpeakerEnabled(false)
 music.setVolume(255)
 
+// 4-digit module
 let my_tm = TM1637.create(DigitalPin.P1, DigitalPin.P2, 7, 4)
 my_tm.on()
+my_tm.showDP(1, true)
 
 function win_round() {
     music._playDefaultBackground(music.builtInPlayableMelody(Melodies.PowerUp), music.PlaybackMode.InBackground)
@@ -37,13 +49,9 @@ type Dictionary = {
     [key: string]: any;
 }
 
-function sum(numbers: any[]): number {
-    let total = 0
-    for (let n of numbers) {
-        total += n
-    }
-    //  Ensure all inputs are converted to floats before summing
-    return total
+
+function sum(numbers: number[]): number {
+    return numbers.reduce((a, b) => a + b, 0);  
 }
 
 function set(lst: any[]): any[] {
@@ -69,6 +77,8 @@ function custom_shuffle(lst: number[]) {
     }
 }
 
+
+// Player initialization
 let player = {
     "name" : "Player",
     "points" : INITIAL_POINTS,
@@ -80,6 +90,8 @@ let player = {
 let player_hand : number[] = []
 let player_wildcard_deck: Dictionary[] = []
 
+
+// Bot initialization
 let bot = {
     "name" : "Bot",
     "points" : INITIAL_POINTS,
@@ -91,66 +103,69 @@ let bot = {
 let bot_hand : number[] = []
 let bot_wildcard_deck: Dictionary[] = []
 
+// Wildcard "table"
 let placed_wildcards: Dictionary[] = []
 
 
-let wildcards: Dictionary[] = [ {
-    "name" : "Justice",
-    "description" : "Swap last drawn card with bot.",
-}
-, {
-    "name" : "Moon",
-    "description" : "Change blackjack goal to 17.",
-}
-, {
-    "name" : "Sun",
-    "description" : "Change blackjack goal to 24.",
-}
-, {
-    "name" : "Death",
-    "description" : "Removes opponent's last placed wildcard.",
-}
-, {
-    "name" : "Strength",
-    "description" : "Both players get a random wildcard.",
-}
-, {
-    "name" : "The Devil",
-    "description" : "Increase bet by 1.",
-}
-, {
-    "name" : "The Star",
-    "description" : "Decrease bet by 1.",
-}
-, {
-    "name" : "The Fool",
-    "description" : "Copy last placed wildcard for immediate use.",
-}
-, {
-    "name" : "The Magician",
-    "description" : "Return last drawn card to deck.",
-}
-, {
-    "name" : "Temperance",
-    "description" : "Average all hand cards.",
-}
-, {
-    "name" : "The Tower",
-    "description" : "Decrease value of all cards by 2.",
-}
-, {
-    "name" : "The High Priestess",
-    "description" : "Cannot lose points this round.",
-}
-, {
-    "name" : "The Chariot",
-    "description" : "Reveal opponent's hidden card.",
-}
-, {
-    "name" : "The Lovers",
-    "description" : "Subtract 5 from hand.",
-}
+let wildcards: Dictionary[] = [ 
+    {
+        "name" : "Justice",
+        "description" : "Swap last drawn card with bot.",
+    }
+    , {
+        "name" : "Moon",
+        "description" : "Change blackjack goal to 17.",
+    }
+    , {
+        "name" : "Sun",
+        "description" : "Change blackjack goal to 24.",
+    }
+    , {
+        "name" : "Death",
+        "description" : "Removes opponent's last placed wildcard.",
+    }
+    , {
+        "name" : "Strength",
+        "description" : "Both players get a random wildcard.",
+    }
+    , {
+        "name" : "The Devil",
+        "description" : "Increase bet by 1.",
+    }
+    , {
+        "name" : "The Star",
+        "description" : "Decrease bet by 1.",
+    }
+    , {
+        "name" : "The Fool",
+        "description" : "Copy last placed wildcard for immediate use.",
+    }
+    , {
+        "name" : "The Magician",
+        "description" : "Return last drawn card to deck.",
+    }
+    , {
+        "name" : "Temperance",
+        "description" : "Replace all cards with the integer average",
+    }
+    , {
+        "name" : "The Tower",
+        "description" : "Decrease value of all cards by 2.",
+    }
+    , {
+        "name" : "The High Priestess",
+        "description" : "Cannot lose points this round.",
+    }
+    , {
+        "name" : "The Chariot",
+        "description" : "Reveal opponent's hidden card.",
+    }
+    , {
+        "name" : "The Lovers",
+        "description" : "Subtract 5 from hand.",
+    }
 ]
+
 function bot_decision_draw(deck: number[]) {
 
     if (sum(bot_hand) >= 15) {
@@ -206,11 +221,15 @@ function bot_draw_card(deck: number[]) {
 }
 
 function reset_hands() {
-    player["last_draw"] = 0
-    bot["last_draw"] = 0
+    player["last_draw"], bot["last_draw"] = 0
     
     player["standing"] = false
+    player["invulnerable"] = false
+
     bot["standing"] = false
+    bot["invulnerable"] = false
+
+    reveal_bot_hidden = false
 
     player_hand.splice(0, player_hand.length)
     bot_hand.splice(0, bot_hand.length)
@@ -226,11 +245,13 @@ function play_blackjack() {
 
     while (player["points"] > 0 && bot["points"] > 0) {
 
-        console.log("Bet: " + bet)
+        console.log(`Bet: ${bet}`)
 
-        deck = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        deck = INITIAL_DECK
         custom_shuffle(deck)
         reset_hands()
+
+        basic.clearScreen()
 
         player_draw_card(deck)
         bot_draw_card(deck)
@@ -426,7 +447,7 @@ function play_blackjack() {
                         `)
 
                         message_splash("Devil!")
-                        message_splash("Bet: " + bet, 2)
+                        message_splash(`Bet: ${bet}`, 2)
                         place()
                         consume()
 
@@ -443,7 +464,7 @@ function play_blackjack() {
                         `)
                 
                         message_splash("Star!")
-                        message_splash("Bet: " + bet, 2)
+                        message_splash(`Bet: ${bet}`, 2)
                         place()
                         consume()
 
@@ -505,10 +526,132 @@ function play_blackjack() {
                         }
 
                         bet = death_wildcard(bet)
+
+                        basic.showLeds(`
+                            # # # # #
+                            # . # . #
+                            # # # # #
+                            . # . # .
+                            . . . . .
+                            `)
                         message_splash("Death.")
                         consume()
                         break
-                    default:
+                    case "Temperance":
+                        // Replace all cards with the integer average
+                        let average: number;
+                        let replace_with_average = (hand: number[]) => {
+                            average = Math.round(sum(hand) / hand.length)
+                            for (let i: number = 0; i <= hand.length - 1; ++i) {
+                                hand[i] = average;
+                            }
+                        }
+
+                        if (player_user) {
+                            replace_with_average(player_hand)
+                        } else {
+                            replace_with_average(bot_hand)
+                        }
+
+                        basic.showLeds(`
+                        # # # # #
+                        # . . . #
+                        . # . # .
+                        . . # . .
+                        . # # # .
+                        `)
+                        
+                        message_splash("Temperance!")
+                        message_splash(`AVG: ${average}`, 2)
+                        consume()
+
+                        break
+                    case "The Tower":
+                        // Subtract two from all cards in hand.
+                        // Deletes cards 1 and 2 if in hand.
+                        // Insta-use.
+                        let subtract_two_from_all_cards = (hand: number[]) => {
+                            let new_hand: number[] = [];
+
+                            for (let card of hand) {
+                                if (card > 2) {
+                                    new_hand.push(card - 2);
+                                }
+                            }
+
+                            return new_hand;
+                        };
+
+                        if (player_user) {
+                            player_hand = subtract_two_from_all_cards(player_hand)
+
+                            message_splash(`PLR: -2`, 2)
+                        } else {
+                            bot_hand = subtract_two_from_all_cards(bot_hand)
+
+                            message_splash(`BOT: -2`, 2)
+                        }
+
+                        basic.showLeds(`
+                        . . # . .
+                        . # . # .
+                        . # # # .
+                        . # # # .
+                        . # # # .
+                        `)
+
+                        message_splash("Tower!")                        
+                        consume()
+                        break
+                    case "The High Priestess":
+                        // Cannot lose points this round.
+                        if (player_user) {
+                            player["invulnerable"] = true
+                            message_splash("PLR: SAFE", 2)
+                        } else {
+                            bot["invulnerable"] = true
+                            message_splash("BOT: SAFE", 2)
+                        }
+
+                        basic.showLeds(`
+                        # . . . #
+                        # . # . #
+                        # # # # #
+                        # . # . #
+                        # . # . #
+                        `)
+
+                        message_splash("HPriestess!")
+                        place()
+                        consume()
+                        break
+                    case "The Chariot":
+                        // Reveal bot's hidden card.
+                        // Bot never draws this card!
+                        // Insta-use.
+                        if (!player_user) {
+                            // If bot were to somehow obtain and use
+                            // this card.
+                            message_splash("ERROR!")
+                            message_splash("BOT CHRT", 2)
+                            consume() // consume just to remove it
+                            break
+                        }
+                
+                        reveal_bot_hidden = true
+
+                        basic.showLeds(`
+                        . # # # .
+                        # . # . #
+                        # # # # #
+                        # . # . #
+                        . # # # .
+                        `)
+
+                        message_splash("Chariot!")
+                        consume()
+                        break
+                    default: // waypoint:2
                         console.log("Card not found!: " + wildcard_name)
                         message_splash("ERROR!")
                         message_splash("INV CARD", 2)
@@ -531,19 +674,23 @@ function play_blackjack() {
                 
                 if (typeof value === "string") {
 
-                    console.log("Used " + value)
                     wildcard_use(value, true)
                     
                     console.log("Player hand:" + player_hand.join())
                 }
             } else {
                 wildcard_display_working = false
+                
             }
 
             input.onPinPressed(TouchPin.P2, function () {
                 wildcard_toggle = !wildcard_toggle
                 main_working = !main_working
                 console.log("Wildcard screen toggle: "+ wildcard_toggle)
+
+                if (!wildcard_toggle) {
+                    console.log(`Player hand: ${player_hand.join()}`)
+                }
             })
 
             basic.pause(1000)
@@ -565,33 +712,7 @@ function play_blackjack() {
 
         OLED12864_I2C.clear()
     }
-
-
-    if (player["points"] > bot["points"]) {
-        // Player wins
-        OLED12864_I2C.showString(0, 0, "YOU WIN!", 1)
-        console.log("PLAYER WINS!")
-        music._playDefaultBackground(music.builtInPlayableMelody(Melodies.JumpUp), 
-        music.PlaybackMode.InBackground)
-    } else {
-        // Bot wins
-        OLED12864_I2C.showString(0, 0, "YOU LOSE!", 1)
-        console.log("PLAYER LOSES!")
-        music._playDefaultBackground(
-            music.builtInPlayableMelody(Melodies.Funeral), 
-            music.PlaybackMode.InBackground)
-    }
-    OLED12864_I2C.showString(0, 3, "Reset to play again.", 1)
-    tube_module_show_points()
-    basic.pause(5000)
-
-    // END GAME
-    
-    basic.clearScreen()
-    
-    my_tm.off()
-    OLED12864_I2C.off()
-
+    end_game()
     return
 }
 
@@ -601,18 +722,18 @@ function death_wildcard(bet: number): number {
     // Does NOT apply to insta-use wildcards
 
     let wildcard_to_remove: Dictionary = placed_wildcards[-1]
-    //let previous_wildcard: Dictionary = placed_wildcards[-2]
+    // { "name": wildcard_name, "player_user": player_user }
     
-    switch(wildcard_to_remove) {
+    switch(wildcard_to_remove["name"]) {
         case "The Devil":
             // UNDO Increment bet by 1.
             bet--
-            message_splash("Bet: " + bet, 2)
+            message_splash(`Bet: ${bet}`, 2)
             break
         case "The Star":
             // UNDO Decrement bet by 1.
             bet++
-            message_splash("Bet: " + bet, 2)
+            message_splash(`Bet: ${bet}`, 2)
             break
         case "Sun":
             // UNDO Set goal to 24.
@@ -638,20 +759,25 @@ function death_wildcard(bet: number): number {
 
             message_splash("Swapped" + bot["last_draw"] + " & " + player["last_draw"], 2)
             break
+            
+        case "The High Priestess":
+            // UNDO Cannot lose points this round.
+            if (wildcard_to_remove["player_user"]) {
+                player["invulnerable"] = false
+                message_splash("PLR: DNGR!", 2)
+            } else {
+                bot["invulnerable"] = false
+                message_splash("BOT: DNGR!", 2)
+            }
+    
+            break
         default:
-            console.log("Death failed: " + wildcard_to_remove)
+            console.log("Death failed: " + wildcard_to_remove["name"])
             message_splash("ERROR!")
             message_splash("INV DTH", 2)
             break
     }
 
-    basic.showLeds(`
-    # . . . #
-    . # . # .
-    . . # . .
-    . # . # .
-    # . . . #
-    `)
 
     return bet
 
@@ -660,7 +786,9 @@ function death_wildcard(bet: number): number {
 function wildcard_display(): string | void {
     OLED12864_I2C.clear()
     
-    console.log("wildcard_display ran!")
+    if (!wildcard_display_working) {
+        return
+    }
 
     let i: number = 0
 
@@ -711,7 +839,6 @@ function wildcard_display(): string | void {
 
     if (wildcard_display_working) {
         if (!(player_wildcard_deck.length == 0)) {
-            console.log("YEAHEAYEAYEAYEAYEHHAhwdyuefhresfeuifuie")
             selected_card = player_wildcard_deck[pointer]["name"]
             wildcard_display_working = false
         }
@@ -723,14 +850,23 @@ function wildcard_display(): string | void {
 function who_won(bet: number) {
 
     function player_wins() {
-        bot["points"] -= bet
+        if (!bot["invulnerable"]) {
+            bot["points"] -= bet 
+        } else {
+            message_screen("BOT: SAFE!")
+        }
         player["points"] += bet
+
         win_round()
         message_screen("Player wins!")
     }
 
     function bot_wins() {
-        player["points"] -= bet
+        if (!player["invulnerable"]) {
+            player["points"] -= bet
+        } else {
+            message_screen("PLR: SAFE!")
+        }
         bot["points"] += bet
         message_screen("Bot wins!")
         music.play(music.builtinPlayableSoundEffect(soundExpression.sad), music.PlaybackMode.UntilDone)
@@ -794,8 +930,9 @@ function display_sum_of_both_hands() {
 
 
 function tube_module_show_points() {
-    let player_points = Math.constrain(player["points"], 0, INITIAL_POINTS * 2)
-    let bot_points = Math.constrain(bot["points"], 0, INITIAL_POINTS * 2)
+    // max 99 because max double-digit numbers
+    let player_points = Math.constrain(player["points"], 0, 99)
+    let bot_points = Math.constrain(bot["points"], 0, 99)
 
     my_tm.showNumber(player_points * 100 + bot_points)
 }
@@ -835,10 +972,10 @@ function main_display() {
     }
 
     index = 0
-    
+
     for (let bcard of bot_hand) {
         card_to_display = " " + bcard
-        if (index) {
+        if (index || reveal_bot_hidden) {
             OLED12864_I2C.showString(index * 2, 0, card_to_display, 1) // INDEX MULTIPLIER MAYBE FIX!!!!!! -------------------
         } else {
             OLED12864_I2C.showString(index * 2, 0, "?", 1)
@@ -858,6 +995,39 @@ function redraw_pointer(): void {
     }
 }
 
+function end_game() {
+    // END GAME
+    if (player["points"] > bot["points"]) {
+        // Player wins
+        OLED12864_I2C.showString(0, 0, "YOU WIN!", 1)
+        console.log("PLAYER WINS!")
+        music._playDefaultBackground(music.builtInPlayableMelody(Melodies.JumpUp),
+            music.PlaybackMode.InBackground)
+    } else {
+        // Bot wins
+        OLED12864_I2C.showString(0, 0, "YOU LOSE!", 1)
+        console.log("PLAYER LOSES!")
+        music._playDefaultBackground(
+            music.builtInPlayableMelody(Melodies.Funeral),
+            music.PlaybackMode.InBackground)
+    }
+    OLED12864_I2C.showString(0, 3, "Reset to play again.", 1)
+    tube_module_show_points()
+    basic.pause(5000)
+
+    // Deactivate screens
+    basic.clearScreen()
+
+    
+    my_tm.clear()
+    my_tm.off()
+
+    OLED12864_I2C.clear()
+    OLED12864_I2C.off()
+
+    return
+}
+
 
 function main_menu() {
     OLED12864_I2C.showString(0, 0, "   ARCANA", 1)
@@ -868,6 +1038,8 @@ function main_menu() {
     input.onGesture(Gesture.Shake, function() {
         console.log("shaked!")
         OLED12864_I2C.invert(false)
+        OLED12864_I2C.clear()
+
         play_blackjack()
     })
     
