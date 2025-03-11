@@ -5,10 +5,8 @@
                 on wildcard_display and not main_display as it should.
 */
 
-
-
 //  Constants
-const INITIAL_POINTS: number = 15
+const INITIAL_POINTS: number = 12
 const INITIAL_BET: number = 1
 
 // Game variables
@@ -32,11 +30,11 @@ OLED12864_I2C.init(60)
 OLED12864_I2C.on()
 
 // Sound / Buzzer
-music.setBuiltInSpeakerEnabled(false)
+music.setBuiltInSpeakerEnabled(true)
 music.setVolume(255)
 
 // 4-digit module
-let my_tm = TM1637.create(DigitalPin.P1, DigitalPin.P2, 7, 4)
+let my_tm = TM1637.create(DigitalPin.P1, DigitalPin.P10, 7, 4)
 my_tm.on()
 my_tm.showDP(1, true)
 
@@ -228,7 +226,7 @@ function bot_decision_draw(deck: number[]) {
         }
     } else if (bot_difficulty === 3) {
         // Hard mode: Uses probability, avoids high bust risk
-        if (sum_of_bot_hand < blackjack_goal - 4) {
+        if (sum_of_bot_hand < blackjack_goal - 7) {
             bot_draw_card(deck);
             console.log("Bot hits (risk-aware)!");
         } else if (bust_chance < 0.2) {
@@ -283,6 +281,14 @@ function chance_get_wildcard(wildcard_deck: Dictionary[], player_user: boolean =
 
         if (player_user) {
             console.log("You received a wildcard:" + new_wildcard["name"])
+            // kick drum... not
+            music.play(
+                music.createSoundExpression(
+                    WaveShape.Sine,
+                    200, 1000, 255, 0, 100,
+                    SoundExpressionEffect.None,
+                    InterpolationCurve.Curve),
+                music.PlaybackMode.UntilDone)
         } else {
             console.log("Bot received a wildcard: " + new_wildcard["name"])
         }
@@ -343,6 +349,19 @@ function reset_round() {
     bot["can_double_winnings"][1] = bot["can_double_winnings"][0]
 }
 
+
+input.onPinPressed(TouchPin.P0, function () {
+    console.log("Pin 2 Pressed!")
+    wildcard_toggle = !wildcard_toggle
+    main_working = !main_working
+    console.log("Wildcard screen toggle: " + wildcard_toggle)
+
+    if (!wildcard_toggle) {
+        console.log(`Player hand: ${player_hand.join()}`)
+    }
+})
+
+
 function play_blackjack() {
 
     let deck: number[];
@@ -354,6 +373,7 @@ function play_blackjack() {
     while (player["points"] > 0 && bot["points"] > 0) {
 
         console.log(`Bet: ${bet}`)
+        message_screen(`New bet: ${bet}`, 1)
 
         deck = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
         custom_shuffle(deck)
@@ -367,7 +387,11 @@ function play_blackjack() {
         console.log("Player hand (reset!):" + player_hand.join())
         console.log("Bot hand (reset!):" + bot_hand.join())
 
-        message_screen(`New bet: ${bet}`, 1)
+        main_working = true
+        wildcard_display_working = false
+        wildcard_toggle = false
+
+        main_display()
 
         while (!(player["standing"] && bot["standing"])) {
 
@@ -409,6 +433,35 @@ function play_blackjack() {
                 while (!player_action_taken) {
                     basic.pause(100); // Small delay to wait for input
                 }
+                
+            }
+
+            // VIEW WILDCARDS
+            if (wildcard_toggle) {
+
+                control.inBackground(function () {
+
+                    // Wildcard display // waypoint:1
+                    wildcard_display_working = true
+                    main_working = false
+                    let value: any = wildcard_display()
+
+                    console.log(typeof value === "string")
+
+                    if (typeof value === "string") {
+                        let { new_deck, new_bet } = wildcard_use(value, true, deck, bet)
+                        deck = new_deck
+                        bet = new_bet
+
+                        console.log("Player hand:" + player_hand.join())
+                        wildcard_toggle = false
+
+                    }
+                })
+
+            } else {
+                wildcard_display_working = false
+                main_working = true
             }
 
             basic.pause(500); // Small delay between turns
@@ -438,43 +491,8 @@ function play_blackjack() {
                 break
             }
             
-            // VIEW WILDCARDS
-            if (wildcard_toggle) {
+            
 
-                control.inBackground(function () {
-
-                    // Wildcard display // waypoint:1
-                    wildcard_display_working = true
-                    main_working = false
-                    let value: any = wildcard_display()
-
-                    console.log(typeof value === "string")
-
-                    if (typeof value === "string") {
-                        let { new_deck, new_bet } = wildcard_use(value, true, deck, bet)
-                        deck = new_deck
-                        bet = new_bet
-
-                        console.log("Player hand:" + player_hand.join())
-                        wildcard_toggle = false
-
-                    }
-                })
-
-            } else {
-                wildcard_display_working = false
-                main_working = true
-            }
-
-            input.onPinPressed(TouchPin.P2, function () {
-                wildcard_toggle = !wildcard_toggle
-                main_working = !main_working
-                console.log("Wildcard screen toggle: " + wildcard_toggle)
-
-                if (!wildcard_toggle) {
-                    console.log(`Player hand: ${player_hand.join()}`)
-                }
-            })
         }
 
         // AFTER SINGLE ROUND // waypoint:3
@@ -745,9 +763,13 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                 message_screen("Cannot copy!")
                 break
             } else {
+                show_wildcard_symbol("The Fool")
                 music.play(
                     music.builtinPlayableSoundEffect(soundExpression.giggle),
                     music.PlaybackMode.UntilDone)
+            
+                basic.clearScreen()
+                
                 consume()
                 wildcard_use(latest_wildcard, player_user, deck, bet)
             }
@@ -1336,12 +1358,12 @@ function message_splash(message: string, y_pos: number = 1) {
     // Shows a message on the OLED during gameplay.
     console.log(message)
 
-    control.inBackground(function () {
-        basic.pause(10)
-        OLED12864_I2C.showString(0, y_pos, message, 1)
-        basic.pause(2000)
-        OLED12864_I2C.showString(0, y_pos, message, 0)
-    })
+    OLED12864_I2C.clear()
+    basic.pause(10)
+    OLED12864_I2C.showString(0, y_pos, message, 1)
+    basic.pause(1000)
+
+    OLED12864_I2C.clear()
 }
 
 function message_screen(message: string, y_pos: number = 1) {
@@ -1350,6 +1372,7 @@ function message_screen(message: string, y_pos: number = 1) {
     basic.pause(10)
     OLED12864_I2C.showString(0, y_pos, message, 1)
     basic.pause(1000)
+
     OLED12864_I2C.clear()
 }
 
