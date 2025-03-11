@@ -101,9 +101,32 @@ let bot = {
 let bot_hand: number[] = []
 let bot_wildcard_deck: Dictionary[] = []
 
+
+
+
+// Bot difficulty
+let bot_difficulty: number = 3;
+
+function cycle_bot_difficulty() {
+    bot_difficulty = (bot_difficulty % 4) + 1; // Cycles between 1-4
+    console.log(`Bot difficulty set to ${bot_difficulty}`);
+    basic.showNumber(bot_difficulty)
+}
+
+let can_change_difficulty = true
+basic.showNumber(bot_difficulty)
+
+input.onLogoEvent(TouchButtonEvent.Pressed, function() {
+    if (can_change_difficulty) {
+        cycle_bot_difficulty()
+    }
+})
+
+
+
+
 // Wildcard "table"
 let placed_wildcards: Dictionary[] = []
-
 
 let wildcards: Dictionary[] = [
     {
@@ -165,18 +188,79 @@ let wildcards: Dictionary[] = [
 ]
 
 function bot_decision_draw(deck: number[]) {
+    let sum_of_bot_hand: number = sum(bot_hand);
+    let sum_of_player_hand: number = sum(player_hand);
+    let remaining_cards: number = deck.length;
+    let bust_chance: number = 0; // Probability of busting if bot draws
 
-    // Hit if the sum of bot's hand is below 15
-    if (sum(bot_hand) >= 15) {
-        bot["standing"] = true
-        console.log("Bot stands.")
+    // Calculate probability of busting
+    for (let card of deck) {
+        if (sum_of_bot_hand + card > blackjack_goal) {
+            bust_chance++;
+        }
+    }
+    bust_chance = bust_chance / remaining_cards; // Convert count to probability
+
+    // Bot logic for hitting or standing
+    if (sum_of_bot_hand >= blackjack_goal) {
+        bot["standing"] = true;
+        console.log("Bot stands (goal reached)!");
+        return;
+    }
+
+    if (bot_difficulty === 1) {
+        // Easy mode: Randomly hits or stands
+        if (Math.random() < 0.5) {
+            bot_draw_card(deck);
+            console.log("Bot hits (randomly)!");
+        } else {
+            bot["standing"] = true;
+            console.log("Bot stands (randomly)!");
+        }
+    } else if (bot_difficulty === 2) {
+        // Medium mode: Hits if low hand, otherwise stands
+        if (sum_of_bot_hand < blackjack_goal - 6) {
+            bot_draw_card(deck);
+            console.log("Bot hits (basic strategy)!");
+        } else {
+            bot["standing"] = true;
+            console.log("Bot stands (basic strategy)!");
+        }
+    } else if (bot_difficulty === 3) {
+        // Hard mode: Uses probability, avoids high bust risk
+        if (sum_of_bot_hand < blackjack_goal - 4) {
+            bot_draw_card(deck);
+            console.log("Bot hits (risk-aware)!");
+        } else if (bust_chance < 0.2) {
+            bot_draw_card(deck);
+            console.log("Bot hits (low risk)!");
+        } else {
+            bot["standing"] = true;
+            console.log("Bot stands (avoiding bust)!");
+        }
 
     } else {
-        bot_draw_card(deck)
-        console.log("Bot hits.")
+        // Expert mode: 50% chance of seeing the next card before deciding
+        let peek_next_card = Math.random() < 0.5 ? deck[0] : null; // EWWWWWW!!!!
+
+        if (peek_next_card !== null) {
+            if (sum_of_bot_hand + peek_next_card > blackjack_goal) {
+                bot["standing"] = true;
+                return;
+            }
+        }
+
+        if (sum_of_bot_hand < blackjack_goal - 4 || (bust_chance < 0.2 && sum_of_bot_hand < blackjack_goal)) {
+            bot_draw_card(deck);
+            console.log("Bot hits (optimal strategy)!");
+        } else {
+            bot["standing"] = true;
+            console.log("Bot stands (optimal decision)!");
+        }
     }
 
 }
+
 function chance_get_wildcard(wildcard_deck: Dictionary[], player_user: boolean = true) {
 
     // No more than 4 wildcards
@@ -188,6 +272,13 @@ function chance_get_wildcard(wildcard_deck: Dictionary[], player_user: boolean =
     let new_wildcard: Dictionary;
     if (randint(0, 10) < 3) {
         new_wildcard = wildcards._pickRandom()
+
+        // Make sure bot does not get The Hierophant
+        while (!player_user && new_wildcard["name"] == "The Hierophant") {
+            new_wildcard = wildcards._pickRandom()
+            basic.pause(2)
+        }
+
         wildcard_deck.push(new_wildcard)
 
         if (player_user) {
@@ -212,7 +303,7 @@ function player_draw_card(deck: number[]) {
 
 }
 
-function bot_draw_card(deck: number[]) {
+function bot_draw_card(deck: number[]): number {
     let card: number;
 
     if (deck) {
@@ -223,7 +314,7 @@ function bot_draw_card(deck: number[]) {
         chance_get_wildcard(bot_wildcard_deck, false)
 
     }
-
+    return card
 }
 
 function reset_round() {
@@ -276,67 +367,77 @@ function play_blackjack() {
         console.log("Player hand (reset!):" + player_hand.join())
         console.log("Bot hand (reset!):" + bot_hand.join())
 
-
-
         message_screen(`New bet: ${bet}`, 1)
 
         while (!(player["standing"] && bot["standing"])) {
 
-            //  HIT
-            input.onButtonPressed(Button.A, function on_button_pressed_a() {
-                if (main_working) {
-                    wildcard_toggle = false
-                    wildcard_display_working = false
+            if (main_working) {
+                // Player's Turn
+                let player_action_taken = false;
 
-                    if (player_hand.length > 4) {
-                        message_screen("Hand full!")
-                    } else {
-                        player_draw_card(deck)
-                        main_display()
-                    }
-                    music.play(music.tonePlayable(Note.C5, music.beat(BeatFraction.Half)), music.PlaybackMode.UntilDone)
-                }
-            })
+                input.onButtonPressed(Button.A, function () {
+                    if (main_working) {
+                        wildcard_toggle = false;
+                        wildcard_display_working = false;
 
-            //  STAND
-            input.onButtonPressed(Button.B, function on_button_pressed_b() {
-                if (main_working) {
-                    main_working = false
-                    wildcard_toggle = false
-                    wildcard_display_working = false
-
-                    player["standing"] = true
-
-                    music.play(music.tonePlayable(Note.C5, music.beat(BeatFraction.Half)), music.PlaybackMode.UntilDone)
-
-                    chance_get_wildcard(player_wildcard_deck, true)
-
-                    //  Bot draws from deck until stand (or specific condition)
-                    while (!bot["standing"]) {
-
-                        if (bot_hand.length > 4) {
-                            break
+                        if (player_hand.length > 4) {
+                            message_screen("Hand full!");
+                        } else {
+                            player_draw_card(deck);
+                            main_display();
+                            player_action_taken = true;
                         }
-
-                        bot_decision_draw(deck)
-                        main_display()
-                        basic.pause(500)
-                        music.play(music.tonePlayable(Note.G5, music.beat(BeatFraction.Eighth)), music.PlaybackMode.UntilDone)
+                        music.play(music.tonePlayable(Note.C5, music.beat(BeatFraction.Half)), music.PlaybackMode.UntilDone);
                     }
+                });
 
-                    if (bot["standing"]) {
-                        return
+                input.onButtonPressed(Button.B, function () {
+                    if (main_working) {
+                        player["standing"] = true;
+                        wildcard_toggle = false;
+                        wildcard_display_working = false;
+                        console.log("You stand!");
+                        player_action_taken = true;
+
+                        chance_get_wildcard(player_wildcard_deck, true);
+
+                        music.play(music.tonePlayable(Note.C5, music.beat(BeatFraction.Half)), music.PlaybackMode.UntilDone);
                     }
+                });
+
+                // Wait for player action
+                while (!player_action_taken) {
+                    basic.pause(100); // Small delay to wait for input
                 }
-            })
+            }
 
+            basic.pause(500); // Small delay between turns
 
+            if (!bot["standing"]) {
+                // Bot's Turn
+                bot_decision_draw(deck);
+
+                music.play(music.tonePlayable(Note.E5, music.beat(BeatFraction.Eighth)), music.PlaybackMode.UntilDone);
+
+                main_display();
+
+                if (bot_wildcard_deck.length > 0) {
+                    let { new_deck, new_bet } = bot_wildcard_decision(deck, bet)
+                    deck = new_deck
+                    bet = new_bet
+                }
+
+                if (bot["standing"]) {
+                    message_screen("Bot stands!");
+                }
+                
+            }
 
             if (player["standing"] && bot["standing"]) {
                 wildcard_toggle = false
                 break
             }
-
+            
             // VIEW WILDCARDS
             if (wildcard_toggle) {
 
@@ -348,7 +449,7 @@ function play_blackjack() {
                     let value: any = wildcard_display()
 
                     console.log(typeof value === "string")
-                    console.log("WHY!")
+
                     if (typeof value === "string") {
                         let { new_deck, new_bet } = wildcard_use(value, true, deck, bet)
                         deck = new_deck
@@ -374,11 +475,6 @@ function play_blackjack() {
                     console.log(`Player hand: ${player_hand.join()}`)
                 }
             })
-
-            basic.pause(1000)
-
-
-
         }
 
         // AFTER SINGLE ROUND // waypoint:3
@@ -398,16 +494,133 @@ function play_blackjack() {
     return
 }
 
+function bot_wildcard_decision(deck: number[], bet: number) {
+    // Bot decision making for wildcard usage.
+    console.log("bot_wildcard_decision!")
+    let sum_of_bot_hand: number = sum(bot_hand)
+    let sum_of_player_hand: number = sum(player_hand)
+
+    function has_wildcard(wildcard_name: string): boolean {
+        // Check if wildcard in bot's wildcard deck
+        return bot_wildcard_deck.some(wildcard => wildcard["name"] === wildcard_name)
+    }
+
+    function bot_use_wildcard(wildcard_name: string) {
+        console.log(`Bot used ${wildcard_name}!`)
+        wildcard_use(wildcard_name, false, deck, bet)
+        let { new_deck, new_bet } = wildcard_use(wildcard_name, false, deck, bet)
+        deck = new_deck
+        bet = new_bet
+    }
+    
+    if (has_wildcard("Sun")) {
+        if (sum_of_bot_hand > 21 && sum_of_bot_hand <= 24) {
+            // Sun card if: 21 < bot_hand <= 24
+            bot_use_wildcard("Sun")
+        } else if (blackjack_goal == 17 && sum_of_bot_hand > blackjack_goal) {
+            // Sun card if bot busts Moon card goal
+            bot_use_wildcard("Sun")
+        } else if (blackjack_goal == 17 && sum_of_player_hand == 17 && sum_of_bot_hand != 17) {
+            // Sun card if player hits Moon goal of 17 and bot doesn't, so player doesn't win.
+            // sum_of_bot_hand < blackjack_goal
+            bot_use_wildcard("Sun")
+        }
+    } else if (has_wildcard("Moon")) {
+        if ((sum_of_bot_hand == 17 || sum_of_bot_hand == 16)) {
+            // Moon card if sum_of_bot_hand is 16 or 17
+            bot_use_wildcard("Moon")
+        } else if (sum_of_bot_hand < sum_of_player_hand && sum_of_player_hand > 17) {
+            // Moon card if player hand is greater than bot hand, and player hand is greater than 17.
+            bot_use_wildcard("Moon")
+        }
+    }
+    if (has_wildcard("Justice")) {
+        // Switches latest drawn card in new array without affecting original hand
+        
+        let bot_hand_after_justice: number[] = bot_hand.slice(0, -1)
+        bot_hand_after_justice.push(player_hand[player_hand.length - 1])
+
+        let player_hand_after_justice: number[] = player_hand.slice(0, -1)
+        player_hand_after_justice.push(bot_hand[bot_hand.length - 1])
+
+        if (sum(bot_hand_after_justice) == blackjack_goal) {
+            // Justice card if it WINS!
+            bot_use_wildcard("Justice")
+        } else if (sum_of_bot_hand > blackjack_goal && sum(bot_hand_after_justice) < blackjack_goal) {
+            // Justice card if switching latest cards unbusts bot
+            bot_use_wildcard("Justice")
+        } else if (sum_of_bot_hand < blackjack_goal - 1 && sum_of_bot_hand > blackjack_goal - 6 && sum_of_bot_hand < sum(bot_hand_after_justice)) {
+            // If sum of bot hand is 1 to 6 less than the goal...
+            // and after-justice bot hand is greater than current bot hand...
+            if (sum(bot_hand_after_justice) <= blackjack_goal) {
+                // and if after-justice bot hand does not bust, use Justice!
+                bot_use_wildcard("Justice")
+            }
+
+        }
+    }
+
+    if (has_wildcard("The Magician")) {
+        if (sum_of_bot_hand > blackjack_goal) {
+            // Bot is over the limit (busted), so undo the last draw
+            bot_use_wildcard("The Magician");
+        }
+    }
+
+    if (has_wildcard("The Devil")) {
+        if (sum_of_bot_hand <= blackjack_goal) {
+            // If bot didn't bust...
+            if (sum_of_bot_hand >= blackjack_goal - 3 && sum_of_player_hand < blackjack_goal - 3) {
+                // Bot has a strong hand, while player has a weak hand
+                bot_use_wildcard("The Devil")
+            } else if (bot["points"] > player["points"] && player["points"] > bet) {
+                // Bot has a point lead and can afford higher stakes
+                // BUT, will not use if player would lose all of their points anyway
+                // if bot wins this round.
+                bot_use_wildcard("The Devil")
+            } else if (sum_of_player_hand > blackjack_goal) {
+                // Player busts!
+                bot_use_wildcard("The Devil")
+            }
+        }
+
+    } else if (has_wildcard("The Star")) {
+        if (sum_of_player_hand <= blackjack_goal) {
+            // If player didn't bust...
+            if (sum_of_bot_hand <= blackjack_goal - 6 && sum_of_player_hand > blackjack_goal - 3) {
+                // Bot has a weak hand, while player has a strong one
+                bot_use_wildcard("The Star");
+            } else if (bet > 5 && sum_of_bot_hand < blackjack_goal - 6) {
+                // If the bet is too high and bot has a bad hand, reduce it
+                bot_use_wildcard("The Star");
+            }
+        }
+    }
+
+
+
+
+
+    return {
+        new_deck: deck,
+        new_bet: bet
+    }
+}
+
 function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[], bet: number) {
     // Player is user -> player_user = true
     // Bot is user -> player_user = false
+
     let place = () => {
+        // Push wildcard to placed_wildcards array.
+
         placed_wildcards.push({ "name": wildcard_name, "player_user": player_user })
-        placed_wildcards.forEach(p => console.log(p["name"]))
+        //placed_wildcards.forEach(p => console.log(p["name"]))
+        show_wildcard_symbol(wildcard_name) // Show wildcard symbol on 5x5 microbit LED.
     }
 
     function consume() {
-        console.log("CONSUME!")
+        // Removes wildcard from user's wildcard deck.
         if (player_user) {
             if (player_wildcard_deck.length == 0) {
                 return
@@ -415,7 +628,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
             for (let i = player_wildcard_deck.length - 1; i >= 0; i--) {
                 if (player_wildcard_deck[i]["name"] == wildcard_name) {
                     player_wildcard_deck.splice(i, 1);
-                    console.log("PW " + player_wildcard_deck.forEach(p => console.log(p["name"])))
                     break
                 }
             }
@@ -426,7 +638,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
             for (let i = bot_wildcard_deck.length - 1; i >= 0; i--) {
                 if (bot_wildcard_deck[i]["name"] == wildcard_name) {
                     bot_wildcard_deck.splice(i, 1);
-                    console.log("BW " + bot_wildcard_deck.forEach(p => console.log(p["name"])))
                     break
                 }
             }
@@ -448,15 +659,7 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
             // Set goal to 24.
             previous_goals.push(blackjack_goal)
             blackjack_goal = 24
-
-            basic.showLeds(`
-                        # . # . #
-                        . # # # .
-                        # # # # #
-                        . # # # .
-                        # . # . #
-                        `)
-
+            
             place()
             consume()
 
@@ -468,13 +671,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
             previous_goals.push(blackjack_goal)
             blackjack_goal = 17
 
-            basic.showLeds(`
-                        . # # # .
-                        . . # # #
-                        . . . # #
-                        . . # # #
-                        . # # # .
-                        `)
             place()
             consume()
             message_splash("Moon!")
@@ -492,13 +688,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
             player_hand.pop()
             player_hand.push(player["last_draw"])
 
-            basic.showLeds(`
-                        . # . # .
-                        # # # # #
-                        . . # . .
-                        . . # . .
-                        . # # # .
-                        `)
             message_splash("Justice!")
             message_splash("Swapped" + bot["last_draw"] + " & " + player["last_draw"], 2)
             place()
@@ -515,14 +704,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                 bot_wildcard_deck.push(new_wildcard)
             }
 
-            basic.showLeds(`
-                        . . . # .
-                        . . # # .
-                        . . # . .
-                        . # # . .
-                        . # . . .
-                        `)
-
             message_splash("Strength!")
             message_splash(" + " + new_wildcard["name"], 2)
             consume()
@@ -531,13 +712,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
         case "The Devil":
             // Increment bet by 1.
             bet++
-            basic.showLeds(`
-                        # . . . #
-                        # # . # #
-                        . # # # .
-                        . # . # .
-                        . . # . .
-                        `)
 
             message_splash("Devil!")
             message_splash(`Bet: ${bet}`, 2)
@@ -548,13 +722,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
         case "The Star":
             // Decrement bet by 1.
             bet--
-            basic.showLeds(`
-                        . . # . .
-                        . # # # .
-                        # # . # #
-                        . # # # .
-                        . . # . .
-                        `)
 
             message_splash("Star!")
             message_splash(`Bet: ${bet}`, 2)
@@ -578,14 +745,6 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                 message_screen("Cannot copy!")
                 break
             } else {
-                basic.showLeds(`
-                            . # . # .
-                            . . . . .
-                            . . # . .
-                            # . . . #
-                            . # # # .
-                            `)
-
                 music.play(
                     music.builtinPlayableSoundEffect(soundExpression.giggle),
                     music.PlaybackMode.UntilDone)
@@ -631,6 +790,8 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                             . # . # .
                             . . . . .
                             `)
+                            
+            control.waitMicros(400000) // 0.4s
             message_splash("Death.")
             consume()
             break
@@ -651,13 +812,15 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                 replace_with_average(bot_hand)
             }
 
-            basic.showLeds(`
-                        # # # # #
-                        # . . . #
-                        . # . # .
-                        . . # . .
-                        . # # # .
-                        `)
+            /*
+                basic.showLeds(`
+                            # # # # #
+                            # . . . #
+                            . # . # .
+                            . . # . .
+                            . # # # .
+                            `)
+            */
 
             message_splash("Temperance!")
             message_splash(`AVG: ${average}`, 2)
@@ -689,7 +852,7 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
 
                 message_splash(`BOT: -2`, 2)
             }
-
+            /*
             basic.showLeds(`
                         . . # . .
                         . # . # .
@@ -697,6 +860,7 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                         . # # # .
                         . # # # .
                         `)
+            */
 
             message_splash("Tower!")
             consume()
@@ -711,13 +875,7 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                 message_splash("BOT: SAFE", 2)
             }
 
-            basic.showLeds(`
-                        # . . . #
-                        # . # . #
-                        # # # # #
-                        # . # . #
-                        # . # . #
-                        `)
+            
 
             message_splash("HPriestess!")
             place()
@@ -739,13 +897,15 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
 
             reveal_bot_hidden = true
 
-            basic.showLeds(`
-                        . . # . .
-                        . # # # .
-                        . . # . .
-                        # # # # #
-                        . . # . .
-                        `)
+            /*
+                basic.showLeds(`
+                            . . # . .
+                            . # # # .
+                            . . # . .
+                            # # # # #
+                            . . # . .
+                            `)
+            */
 
             message_splash("Hierophant!")
             consume()
@@ -762,16 +922,16 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
                 bot["points"] -= 2
                 bot["can_double_winnings"][0] = true
                 message_splash("- Bot", 2)
-            }
-
-
-            basic.showLeds(`
-                . . # . .
-                . . # . .
-                . # # # .
-                . . # . .
-                . . . . .
-                `)
+            }  
+            /*
+                basic.showLeds(`
+                        . . # . .
+                        . . # . .
+                        . # # # .
+                        . . # . .
+                        . . . . .
+                        `)
+            */
             message_splash("Hanged Man!")
             consume()
             break
@@ -789,6 +949,88 @@ function wildcard_use(wildcard_name: string, player_user: boolean, deck: number[
 
 }
 
+
+function show_wildcard_symbol(wildcard_name: string): void {
+    // Show a specific wildcard symbol on the 5x5 microbit LED.
+    switch(wildcard_name) {
+        case "Sun":
+            basic.showLeds(`
+                        # . # . #
+                        . # # # .
+                        # # # # #
+                        . # # # .
+                        # . # . #
+                        `)
+            break
+        case "Moon":
+            basic.showLeds(`
+                        . # # # .
+                        . . # # #
+                        . . . # #
+                        . . # # #
+                        . # # # .
+                        `)
+            break
+        case "Justice":
+            basic.showLeds(`
+                        . # . # .
+                        # # # # #
+                        . . # . .
+                        . . # . .
+                        . # # # .
+                        `)
+            break
+        case "Strength":
+            basic.showLeds(`
+                        . . . # .
+                        . . # # .
+                        . . # . .
+                        . # # . .
+                        . # . . .
+                        `)
+            break
+        case "The Devil":
+            basic.showLeds(`
+                        # . . . #
+                        # # . # #
+                        . # # # .
+                        . # . # .
+                        . . # . .
+                        `)
+            break
+        case "The Star":
+            basic.showLeds(`
+                        . . # . .
+                        . # # # .
+                        # # . # #
+                        . # # # .
+                        . . # . .
+                        `)
+            break
+        case "The Fool":
+            basic.showLeds(`
+                        . # . # .
+                        . . . . .
+                        . . # . .
+                        # . . . #
+                        . # # # .
+                        `)
+            break
+        case "The High Priestess":
+            basic.showLeds(`
+                        # . . . #
+                        # . # . #
+                        # # # # #
+                        # . # . #
+                        # . # . #
+                        `)
+            break
+        default:
+            console.log("Could not show symbol on LED!")
+            
+    }
+}
+
 function death_wildcard(bet: number): number {
     // Removes last placed wildcard.
     // Undoes effect of removed wildcard
@@ -801,7 +1043,8 @@ function death_wildcard(bet: number): number {
         return bet
     }
 
-    let wildcard_to_remove: Dictionary = placed_wildcards[placed_wildcards.length - 1]
+    let wildcard_to_remove: Dictionary = placed_wildcards.pop()
+    let previous_wildcard: Dictionary = placed_wildcards[placed_wildcards.length - 1]
     // { "name": wildcard_name, "player_user": player_user }
 
     switch (wildcard_to_remove["name"]) {
@@ -855,9 +1098,11 @@ function death_wildcard(bet: number): number {
             console.log("Death failed: " + wildcard_to_remove["name"])
             message_splash("ERROR!")
             message_splash("INV DTH", 2)
-            break
+            return bet
     }
 
+    // Show previously placed wildcard on screen.
+    show_wildcard_symbol(previous_wildcard["name"])
 
     return bet
 
@@ -1200,7 +1445,10 @@ function main_menu() {
         console.log("shaked!")
         OLED12864_I2C.invert(false)
         OLED12864_I2C.clear()
+        can_change_difficulty = false
+        basic.clearScreen()
 
+        control.waitMicros(10000)
         play_blackjack()
     })
 
